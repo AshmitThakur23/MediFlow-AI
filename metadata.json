@@ -1,0 +1,10 @@
+{
+  "name": "MediFlow AI",
+  "description": "Synthetic academic clinical workspace for source-linked patient history and clinician-controlled consultation workflows.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

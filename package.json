@@ -1,0 +1,17 @@
+{
+  "name": "mediflow-ai",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "node server.ts",
+    "build": "npm run build --workspace=frontend && tsc -p tsconfig.server.json --noEmit",
+    "lint": "npm run lint --workspace=frontend",
+    "start": "node server.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
