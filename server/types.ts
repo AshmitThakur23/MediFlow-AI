@@ -347,3 +347,28 @@ export interface ExtractedDraft {
     missing_prescription_information: string[]
   }
 }
+
+export interface PersonalNoteDraft {
+  id: string
+  hospital_id: string
+  patient_id: string
+  encounter_id: string | null
+  created_by_hospital_user_id: string
+  raw_input_text: string
+  input_mode: 'voice' | 'written'
+  format_mode: 'concise_polish' | 'key_points_summary' | 'manual'
+  title: string
+  bullet_points: string[]
+  status: 'draft' | 'approved' | 'cancelled'
+  created_at: string
+  updated_at: string
+}
+
+export interface FormattedPersonalNotes {
+  mode_applied: 'concise_polish' | 'key_points_summary'
+  title: string
+  bullet_points: string[]
+  spelling_corrections_note: string | null
+  uncertainties: string[]
+}
+

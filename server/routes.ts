@@ -6,6 +6,7 @@ import type {
   ClinicalNoteDraft,
   MedicalDocument,
   Patient,
+  PersonalNoteDraft,
   PrescriptionDraft,
   PrescriptionDraftLine,
   PrescriptionLine,
@@ -23,7 +24,10 @@ import {
   validatePatientObjectAccess,
 } from './security.ts'
 import { store } from './store.ts'
-import { generateClinicalDraftWithGemini } from './gemini.ts'
+import {
+  formatPersonalNotesWithGemini,
+  generateClinicalDraftWithGemini,
+} from './gemini.ts'
 
 export const apiRouter = express.Router()
 
@@ -1727,9 +1731,184 @@ apiRouter.post(
         return
       }
       console.error('[MediFlow AI] Gemini clinical-draft error:', message)
+      const safeDetail = message.replace(/AIza[0-9A-Za-z_-]{10,}/g, '[redacted]')
       res.status(502).json({
-        detail: 'Gemini could not generate a valid clinical draft',
+        detail: `Gemini could not generate a valid clinical draft: ${safeDetail}`,
       })
     }
   },
 )
+
+// Personal Patient Notes (Persistence + Approval + Adaptive Gemini Point-Wise Formatting)
+apiRouter.post(
+  '/personal-notes',
+  requireRoles('doctor'),
+  (req: AuthenticatedRequest, res) => {
+    const ctx = req.authContext!
+    const body = req.body ?? {}
+    const patient = getPatientInHospital(ctx, body.patient_id, res)
+    if (!patient) return
+    if (body.encounter_id != null) {
+      if (!validateEncounterForPatient(ctx, body.encounter_id, patient.id, res)) {
+        return
+      }
+    }
+    const bulletPoints = Array.isArray(body.bullet_points)
+      ? body.bullet_points
+          .map((item: unknown) => (typeof item === 'string' ? item.trim() : ''))
+          .filter(Boolean)
+      : []
+
+    if (bulletPoints.length === 0) {
+      res
+        .status(422)
+        .json({ detail: 'At least one personal note point is required' })
+      return
+    }
+
+    const inputMode = body.input_mode === 'voice' ? 'voice' : 'written'
+    const formatMode =
+      body.format_mode === 'concise_polish' ||
+      body.format_mode === 'key_points_summary'
+        ? body.format_mode
+        : 'manual'
+    const nowIso = new Date().toISOString()
+
+    const draft: PersonalNoteDraft = {
+      id: crypto.randomUUID(),
+      hospital_id: ctx.hospitalId,
+      patient_id: patient.id,
+      encounter_id: body.encounter_id ?? null,
+      created_by_hospital_user_id: ctx.assignment.id,
+      raw_input_text:
+        typeof body.raw_input_text === 'string' ? body.raw_input_text : '',
+      input_mode: inputMode,
+      format_mode: formatMode,
+      title:
+        typeof body.title === 'string' && body.title.trim()
+          ? body.title.trim()
+          : 'Patient Care Instructions',
+      bullet_points: bulletPoints,
+      status: 'draft',
+      created_at: nowIso,
+      updated_at: nowIso,
+    }
+    store.personalNoteDrafts.set(draft.id, draft)
+    res.status(201).json(draft)
+  },
+)
+
+apiRouter.get(
+  '/personal-notes',
+  requireRoles('doctor'),
+  (req: AuthenticatedRequest, res) => {
+    const ctx = req.authContext!
+    const patientId =
+      typeof req.query.patient_id === 'string' ? req.query.patient_id : ''
+    if (!getPatientInHospital(ctx, patientId, res)) return
+    const list: PersonalNoteDraft[] = []
+    for (const draft of store.personalNoteDrafts.values()) {
+      if (
+        draft.hospital_id === ctx.hospitalId &&
+        draft.patient_id === patientId
+      ) {
+        list.push(draft)
+      }
+    }
+    list.sort((a, b) => b.created_at.localeCompare(a.created_at))
+    res.json(list)
+  },
+)
+
+apiRouter.patch(
+  '/personal-notes/:noteId/approval',
+  requireRoles('doctor'),
+  (req: AuthenticatedRequest, res) => {
+    const ctx = req.authContext!
+    const draft = store.personalNoteDrafts.get(String(req.params.noteId))
+    if (!draft || draft.hospital_id !== ctx.hospitalId) {
+      res.status(404).json({ detail: 'Personal note draft not found' })
+      return
+    }
+    if (!validatePatientObjectAccess(ctx.assignment, draft.patient_id)) {
+      res
+        .status(403)
+        .json({ detail: 'No approved patient relationship for this operation' })
+      return
+    }
+    if (draft.status !== 'draft') {
+      res
+        .status(409)
+        .json({ detail: 'Only an existing draft can be approved or cancelled' })
+      return
+    }
+    draft.status = req.body?.approved ? 'approved' : 'cancelled'
+    draft.updated_at = new Date().toISOString()
+    res.json(draft)
+  },
+)
+
+apiRouter.post(
+  '/ai/personal-notes',
+  requireRoles('doctor'),
+  async (req: AuthenticatedRequest, res) => {
+    const ctx = req.authContext!
+    const {
+      patient_id,
+      encounter_id = null,
+      raw_text,
+      input_mode = 'written',
+    } = req.body ?? {}
+
+    const patient = getPatientInHospital(ctx, patient_id, res)
+    if (!patient) return
+
+    if (encounter_id != null) {
+      if (!validateEncounterForPatient(ctx, encounter_id, patient.id, res)) {
+        return
+      }
+    }
+
+    if (
+      typeof raw_text !== 'string' ||
+      raw_text.trim().length < 1 ||
+      raw_text.length > 30000
+    ) {
+      res
+        .status(422)
+        .json({ detail: 'Note text must be between 1 and 30000 characters' })
+      return
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      res.status(503).json({ detail: 'GEMINI_API_KEY is not configured' })
+      return
+    }
+
+    try {
+      const notes = await formatPersonalNotesWithGemini({
+        patient,
+        rawText: raw_text,
+        inputMode: input_mode === 'voice' ? 'voice' : 'written',
+      })
+      res.json({
+        is_ai_draft: true,
+        clinical_approval_required: true,
+        notes,
+      })
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown Gemini error'
+      if (message === 'GEMINI_API_KEY_MISSING') {
+        res.status(503).json({ detail: 'GEMINI_API_KEY is not configured' })
+        return
+      }
+      console.error('[MediFlow AI] Gemini personal-notes error:', message)
+      const safeDetail = message.replace(/AIza[0-9A-Za-z_-]{10,}/g, '[redacted]')
+      res.status(502).json({
+        detail: `Gemini could not format the personal notes draft: ${safeDetail}`,
+      })
+    }
+  },
+)
+

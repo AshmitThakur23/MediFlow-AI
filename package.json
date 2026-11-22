@@ -3,15 +3,25 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "workspaces": [
-    "frontend"
-  ],
   "scripts": {
     "dev": "node server.ts",
-    "build": "npm run build --workspace=frontend && tsc -p tsconfig.server.json --noEmit",
-    "lint": "npm run lint --workspace=frontend",
+    "build": "vite build",
+    "lint": "tsc --noEmit",
     "start": "node server.ts"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@google/genai": "^3.6.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "express": "^5.3.0",
+    "lucide-react": "^1.77.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  },
   "devDependencies": {}
 }

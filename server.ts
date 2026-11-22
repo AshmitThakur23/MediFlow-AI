@@ -8,8 +8,8 @@ import { seedDemoData } from './server/store.ts'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number.parseInt(process.env.PORT ?? '3000', 10) || 3000
 const API_V1_PREFIX = process.env.API_V1_PREFIX || '/api/v1'
-const FRONTEND_DIR = path.resolve(__dirname, 'frontend')
-const FRONTEND_DIST_DIR = path.resolve(FRONTEND_DIR, 'dist')
+const ROOT_DIR = __dirname
+const DIST_DIR = path.resolve(ROOT_DIR, 'dist')
 
 seedDemoData()
 
@@ -21,13 +21,13 @@ async function createApp() {
 
   const useProductionStatic =
     process.env.NODE_ENV === 'production' &&
-    fs.existsSync(path.join(FRONTEND_DIST_DIR, 'index.html'))
+    fs.existsSync(path.join(DIST_DIR, 'index.html'))
 
   if (useProductionStatic) {
-    app.use(express.static(FRONTEND_DIST_DIR))
+    app.use(express.static(DIST_DIR))
     app.use((req, res, next) => {
       if (req.method === 'GET' && !req.path.startsWith('/api/')) {
-        res.sendFile(path.join(FRONTEND_DIST_DIR, 'index.html'))
+        res.sendFile(path.join(DIST_DIR, 'index.html'))
         return
       }
       next()
@@ -35,8 +35,8 @@ async function createApp() {
   } else {
     const { createServer: createViteServer } = await import('vite')
     const vite = await createViteServer({
-      root: FRONTEND_DIR,
-      configFile: path.join(FRONTEND_DIR, 'vite.config.ts'),
+      root: ROOT_DIR,
+      configFile: path.join(ROOT_DIR, 'vite.config.ts'),
       server: {
         middlewareMode: true,
         hmr: false,
